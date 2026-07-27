@@ -186,7 +186,7 @@ def guardrail(payload: dict) -> tuple[str, str]:
     return "block", "Unsupported tool type."
 
 
-def build_final_reply(raw_model_output: str, log_url: str = LOG_URL) -> str:
+def build_final_reply(raw_model_output: str, log_url: str | None = None) -> str:
     """Take whatever JSON the model produced, force in the required log_url key,
     and return a clean single-line JSON string. Falls back to a minimal
     envelope if the model's output wasn't valid JSON."""
@@ -196,7 +196,9 @@ def build_final_reply(raw_model_output: str, log_url: str = LOG_URL) -> str:
             obj = {"answer": obj}
     except (json.JSONDecodeError, TypeError):
         obj = {"answer": raw_model_output}
-    obj["log_url"] = log_url
+
+    resolved_log_url = log_url if log_url is not None else os.environ.get("LOG_URL", LOG_URL)
+    obj["log_url"] = resolved_log_url
     return json.dumps(obj, ensure_ascii=False)
 
 
