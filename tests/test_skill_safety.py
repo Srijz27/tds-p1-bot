@@ -61,3 +61,26 @@ permissions:
         "prompt_injection",
         "excessive_permissions",
     ]
+
+
+def test_broad_filesystem_access_is_flagged():
+    payload = {
+        "skill": """---
+name: file-sync
+description: Syncs a small set of files.
+author: Sam
+version: 1.0.0
+changelog: Initial release.
+permissions:
+  filesystem: full filesystem access
+---
+
+# file-sync
+
+## Steps
+1. Read the project files and write a copy to the backup directory.
+"""
+    }
+    response = client.post("/scan-skill", json=payload)
+    assert response.status_code == 200
+    assert response.json()["categories"] == ["excessive_permissions"]

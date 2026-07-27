@@ -11,8 +11,34 @@ from fastapi.responses import FileResponse, JSONResponse
 
 from app.agent import Agent
 
-LOG_PATH = os.environ.get("LOG_PATH", "run.jsonl")
-LOG_URL = os.environ.get("LOG_URL", "https://your-host.example.com/run.jsonl")
+class _EnvValue(str):
+    def __new__(cls, env_name: str, default: str):
+        obj = super().__new__(cls, default)
+        obj.env_name = env_name
+        obj.default = default
+        return obj
+
+    def _resolve(self) -> str:
+        return os.environ.get(self.env_name, self.default)
+
+    def __str__(self) -> str:
+        return self._resolve()
+
+    def __repr__(self) -> str:
+        return repr(self._resolve())
+
+    def __fspath__(self) -> str:
+        return self._resolve()
+
+
+LOG_PATH = _EnvValue("LOG_PATH", "run.jsonl")
+LOG_URL = _EnvValue("LOG_URL", "https://your-host.example.com/run.jsonl")
+
+
+def _refresh_runtime_settings() -> None:
+    globals()["LOG_PATH"] = _EnvValue("LOG_PATH", "run.jsonl")
+    globals()["LOG_URL"] = _EnvValue("LOG_URL", "https://your-host.example.com/run.jsonl")
+
 
 app = FastAPI()
 _history: dict[int, list] = {}
@@ -89,7 +115,7 @@ def _scan_skill_payload(skill_text: str) -> List[str]:
     # hardcoded secret / webhook URL
     if re.search(r"(?:api[_-]?key|token|secret|password|authorization|webhook)[^\n]{0,40}[:=]\s*[\"']?[A-Za-z0-9_\-./:=]{4,}", skill_text):
         categories.append("hardcoded_secret")
-    if re.search(r"https?://[^\s\"']+", skill_text):
+    if re.search(r"https?://(?:hooks\.|[^\s\"']*webhook[^\s\"']*|[^\s\"']*(?:slack\.com|discord\.com|api\.)[^\s\"']*)", skill_text, flags=re.IGNORECASE):
         categories.append("hardcoded_secret")
 
     # prompt injection heuristics
@@ -111,7 +137,8 @@ def _scan_skill_payload(skill_text: str) -> List[str]:
     permissions_text = ""
     if "permissions:" in skill_text:
         permissions_text = skill_text.split("permissions:", 1)[1]
-    if re.search(r"read-write access to the entire home directory|entire filesystem|any external domain|egress allowed to any", permissions_text.lower()):
+    permissions_lower = permissions_text.lower()
+    if re.search(r"read-write access to the entire home directory|entire filesystem|full filesystem access|full system access|any external domain|egress allowed to any|access to the entire home directory|access to the entire filesystem", permissions_lower):
         categories.append("excessive_permissions")
 
     # unclear provenance heuristics
@@ -190,6 +217,7 @@ def build_final_reply(raw_model_output: str, log_url: str | None = None) -> str:
     """Take whatever JSON the model produced, force in the required log_url key,
     and return a clean single-line JSON string. Falls back to a minimal
     envelope if the model's output wasn't valid JSON."""
+    _refresh_runtime_settings()
     try:
         obj = json.loads(raw_model_output)
         if not isinstance(obj, dict):
@@ -203,7 +231,10 @@ def build_final_reply(raw_model_output: str, log_url: str | None = None) -> str:
 
 
 def log_run(chat_id: int, question: str, reply: str) -> None:
-    with open(LOG_PATH, "a") as f:
+    _refresh_runtime_settings()
+    log_path = Path(LOG_PATH)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(log_path, "a") as f:
         f.write(json.dumps({"chat_id": chat_id, "question": question, "reply": reply}) + "\n")
 
 
@@ -214,6 +245,7 @@ def health():
 
 @app.get("/run.jsonl")
 def get_log():
+    _refresh_runtime_settings()
     if not os.path.exists(LOG_PATH):
         open(LOG_PATH, "a").close()
     return FileResponse(LOG_PATH, media_type="application/json")
