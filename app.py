@@ -17,9 +17,10 @@ Response body:
 { "decision": "continue" | "halt", "reason": "short human-readable string" }
 """
 
-import re
 import json
-from flask import Flask, request, jsonify
+import re
+
+from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
